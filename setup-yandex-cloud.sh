@@ -41,12 +41,24 @@ yc config set folder-id $FOLDER_ID
 
 # Проверка, можно ли использовать существующий Service Account
 EXISTING_SA_ID="ajeuaiav6i7hoi6tlqbh"
+SKIP_SA_CREATION=false
+
 if yc iam service-account get --id $EXISTING_SA_ID &> /dev/null; then
     # Проверяем, есть ли у него доступ к нужному каталогу
-    if yc resource-manager folder list-access-bindings $FOLDER_ID --format json 2>/dev/null | jq -r ".[] | select(.subject.id == \"$EXISTING_SA_ID\") | .role" | grep -q "editor"; then
+    HAS_ACCESS=$(yc resource-manager folder list-access-bindings $FOLDER_ID --format json 2>/dev/null | jq -r ".[] | select(.subject.id == \"$EXISTING_SA_ID\") | .role" | head -1)
+    if [ ! -z "$HAS_ACCESS" ]; then
         echo "✅ Используется существующий Service Account: $EXISTING_SA_ID"
         SA_ID=$EXISTING_SA_ID
         SKIP_SA_CREATION=true
+    else
+        echo "⚠️  Service Account существует, но нет доступа к каталогу. Назначаем роль..."
+        yc resource-manager folder add-access-binding $FOLDER_ID \
+          --role editor \
+          --subject serviceAccount:$EXISTING_SA_ID \
+          2>&1 | grep -v "already exists" || true
+        SA_ID=$EXISTING_SA_ID
+        SKIP_SA_CREATION=true
+        echo "✅ Роль назначена, используем существующий Service Account"
     fi
 fi
 
@@ -125,6 +137,42 @@ DB_USER="events_user"
 # Генерация пароля
 DB_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16)
 
+# Поиск существующей сети
+NETWORK_ID=$(yc vpc network list --folder-id $FOLDER_ID --format json 2>/dev/null | jq -r '.[0].id // empty')
+if [ -z "$NETWORK_ID" ]; then
+    echo "⚠️  Сеть не найдена. Попытка создать (может быть ошибка квоты)..."
+    NETWORK_OUTPUT=$(yc vpc network create --name default --folder-id $FOLDER_ID --format json 2>&1)
+    if echo "$NETWORK_OUTPUT" | grep -q "ResourceExhausted"; then
+        echo "❌ Квота на сети исчерпана. Используйте существующую сеть вручную."
+        echo "Список сетей:"
+        yc vpc network list --folder-id $FOLDER_ID
+        exit 1
+    else
+        NETWORK_ID=$(echo "$NETWORK_OUTPUT" | jq -r '.id' 2>/dev/null)
+        echo "✅ Сеть создана: $NETWORK_ID"
+    fi
+else
+    NETWORK_NAME=$(yc vpc network get --id $NETWORK_ID --format json 2>/dev/null | jq -r '.name // "unknown"')
+    echo "✅ Используется существующая сеть: $NETWORK_NAME ($NETWORK_ID)"
+fi
+
+# Поиск существующей подсети
+SUBNET_ID=$(yc vpc subnet list --folder-id $FOLDER_ID --format json 2>/dev/null | jq -r ".[] | select(.zone_id == \"ru-central1-a\") | .id" | head -1)
+if [ -z "$SUBNET_ID" ]; then
+    echo "Создание подсети в ru-central1-a..."
+    SUBNET_OUTPUT=$(yc vpc subnet create --folder-id $FOLDER_ID --network-id $NETWORK_ID --zone ru-central1-a --range 10.1.0.0/24 --format json 2>&1)
+    if echo "$SUBNET_OUTPUT" | grep -q "ERROR"; then
+        echo "❌ Ошибка создания подсети. Попробуйте создать вручную."
+        exit 1
+    else
+        SUBNET_ID=$(echo "$SUBNET_OUTPUT" | jq -r '.id' 2>/dev/null)
+        echo "✅ Подсеть создана: $SUBNET_ID"
+    fi
+else
+    SUBNET_NAME=$(yc vpc subnet get --id $SUBNET_ID --format json 2>/dev/null | jq -r '.name // "unknown"')
+    echo "✅ Используется существующая подсеть: $SUBNET_NAME ($SUBNET_ID)"
+fi
+
 if yc managed-postgresql cluster get --name $DB_NAME --folder-id $FOLDER_ID &> /dev/null; then
     echo "⚠️  Кластер '$DB_NAME' уже существует"
     DB_HOST=$(yc managed-postgresql host list --cluster-name $DB_NAME --folder-id $FOLDER_ID --format json | jq -r '.[0].name')
@@ -132,12 +180,12 @@ else
     echo "Создание кластера PostgreSQL (это может занять несколько минут)..."
     yc managed-postgresql cluster create \
       --name $DB_NAME \
-      --folder-id b1ggdi2brlp9vqlbg90a \
-      --network-name default \
+      --folder-id $FOLDER_ID \
+      --network-id $NETWORK_ID \
       --resource-preset s2.micro \
       --disk-type network-ssd \
       --disk-size 20 \
-      --host zone-id=ru-central1-a,subnet-name=default-ru-central1-a \
+      --host zone-id=ru-central1-a,subnet-id=$SUBNET_ID \
       --user name=$DB_USER,password=$DB_PASSWORD \
       --database name=events_db,owner=$DB_USER \
       --async
