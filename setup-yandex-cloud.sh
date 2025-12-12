@@ -39,20 +39,58 @@ echo "📁 Используется каталог: $FOLDER_ID"
 # Установка каталога по умолчанию
 yc config set folder-id $FOLDER_ID
 
-if yc iam service-account get --name $SA_NAME --folder-id $FOLDER_ID &> /dev/null; then
-    echo "⚠️  Service Account '$SA_NAME' уже существует"
-    SA_ID=$(yc iam service-account get --name $SA_NAME --folder-id $FOLDER_ID --format json | jq -r '.id')
-else
-    yc iam service-account create --name $SA_NAME --folder-id $FOLDER_ID --description "Service account for events platform"
-    SA_ID=$(yc iam service-account get --name $SA_NAME --folder-id $FOLDER_ID --format json | jq -r '.id')
-    echo "✅ Service Account создан: $SA_ID"
+# Проверка существования Service Account
+SA_EXISTS=false
+SA_ID=""
+
+# Попытка найти существующий Service Account по имени
+if yc iam service-account list --folder-id $FOLDER_ID --format json 2>/dev/null | jq -r ".[] | select(.name == \"$SA_NAME\") | .id" | head -1 | read SA_ID; then
+    if [ ! -z "$SA_ID" ]; then
+        SA_EXISTS=true
+        echo "✅ Service Account '$SA_NAME' уже существует: $SA_ID"
+    fi
 fi
 
-# Назначение роли
+# Если не найден, попробуем создать
+if [ "$SA_EXISTS" = false ] || [ -z "$SA_ID" ]; then
+    echo "Создание нового Service Account..."
+    if SA_ID=$(yc iam service-account create --name $SA_NAME --folder-id $FOLDER_ID --description "Service account for events platform" --format json 2>&1 | jq -r '.id' 2>/dev/null); then
+        if [ ! -z "$SA_ID" ] && [ "$SA_ID" != "null" ]; then
+            echo "✅ Service Account создан: $SA_ID"
+            SA_EXISTS=true
+        else
+            # Если создание не удалось, попробуем найти существующий по ID из ошибки
+            echo "⚠️  Не удалось создать Service Account, возможно он уже существует"
+            # Попробуем найти все Service Accounts в каталоге
+            SA_ID=$(yc iam service-account list --folder-id $FOLDER_ID --format json 2>/dev/null | jq -r ".[] | select(.name == \"$SA_NAME\") | .id" | head -1)
+            if [ ! -z "$SA_ID" ]; then
+                echo "✅ Найден существующий Service Account: $SA_ID"
+                SA_EXISTS=true
+            else
+                echo "❌ Не удалось найти или создать Service Account"
+                exit 1
+            fi
+        fi
+    else
+        # Если ошибка "AlreadyExists", попробуем найти существующий
+        echo "⚠️  Service Account уже существует, ищем его..."
+        SA_ID=$(yc iam service-account list --folder-id $FOLDER_ID --format json 2>/dev/null | jq -r ".[] | select(.name == \"$SA_NAME\") | .id" | head -1)
+        if [ ! -z "$SA_ID" ]; then
+            echo "✅ Найден существующий Service Account: $SA_ID"
+            SA_EXISTS=true
+        else
+            echo "❌ Не удалось найти Service Account"
+            exit 1
+        fi
+    fi
+fi
+
+# Назначение роли (игнорируем ошибку, если роль уже назначена)
+echo "Назначение роли editor..."
 yc resource-manager folder add-access-binding $FOLDER_ID \
   --role editor \
   --subject serviceAccount:$SA_ID \
-  --quiet || echo "⚠️  Роль уже назначена"
+  2>&1 | grep -v "already exists" || echo "✅ Роль назначена или уже была назначена"
 
 echo "✅ Service Account настроен"
 echo ""
