@@ -50,26 +50,41 @@ else
     echo "Создание нового Service Account..."
     CREATE_OUTPUT=$(yc iam service-account create --name $SA_NAME --folder-id $FOLDER_ID --description "Service account for events platform" --format json 2>&1)
     
+    # Проверяем результат создания
     if echo "$CREATE_OUTPUT" | grep -q "AlreadyExists"; then
-        echo "⚠️  Service Account уже существует (возможно в другом каталоге), ищем в текущем..."
+        echo "⚠️  Service Account с таким именем уже существует в другом каталоге"
+        echo "Попытка найти Service Account в текущем каталоге..."
+        # Проверяем список еще раз
+        SA_LIST=$(yc iam service-account list --folder-id $FOLDER_ID --format json 2>/dev/null || echo "[]")
         SA_ID=$(echo "$SA_LIST" | jq -r ".[] | select(.name == \"$SA_NAME\") | .id" | head -1)
+        
         if [ -z "$SA_ID" ] || [ "$SA_ID" = "null" ]; then
-            # Попробуем создать с другим именем
-            SA_NAME="events-sa-$(date +%s)"
-            echo "Создание Service Account с именем: $SA_NAME"
-            CREATE_OUTPUT=$(yc iam service-account create --name $SA_NAME --folder-id $FOLDER_ID --description "Service account for events platform" --format json 2>&1)
-            SA_ID=$(echo "$CREATE_OUTPUT" | jq -r '.id' 2>/dev/null)
+            # Создаем с уникальным именем
+            SA_NAME_NEW="events-sa-$(date +%s | cut -c1-10)"
+            echo "Создание Service Account с уникальным именем: $SA_NAME_NEW"
+            CREATE_OUTPUT=$(yc iam service-account create --name $SA_NAME_NEW --folder-id $FOLDER_ID --description "Service account for events platform" --format json 2>&1)
+            
+            if echo "$CREATE_OUTPUT" | grep -q "AlreadyExists"; then
+                echo "❌ Не удалось создать Service Account"
+                echo "Попробуйте создать вручную:"
+                echo "  yc iam service-account create --name events-sa-manual --folder-id $FOLDER_ID"
+                exit 1
+            else
+                SA_ID=$(echo "$CREATE_OUTPUT" | jq -r '.id' 2>/dev/null)
+                SA_NAME=$SA_NAME_NEW
+            fi
         fi
     else
+        # Успешное создание
         SA_ID=$(echo "$CREATE_OUTPUT" | jq -r '.id' 2>/dev/null)
     fi
     
     if [ ! -z "$SA_ID" ] && [ "$SA_ID" != "null" ]; then
-        echo "✅ Service Account создан: $SA_ID"
+        echo "✅ Service Account создан: $SA_ID (имя: $SA_NAME)"
     else
         echo "❌ Не удалось создать или найти Service Account"
         echo "Попробуйте создать вручную:"
-        echo "  yc iam service-account create --name $SA_NAME --folder-id $FOLDER_ID"
+        echo "  yc iam service-account create --name events-sa-manual --folder-id $FOLDER_ID"
         exit 1
     fi
 fi
