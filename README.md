@@ -91,8 +91,8 @@
 
 ### 1. Клонирование репозитория
 ```bash
-git clone https://github.com/YOUR_USERNAME/events-platform.git
-cd events-platform
+git clone https://github.com/vidmichd-lab/lug-events.git
+cd lug-events
 ```
 
 ### 2. Локальная разработка
@@ -115,5 +115,4 @@ docker-compose exec backend npm run seed
 📖 **Подробные инструкции**: см. `QUICKSTART.md` и `NEXT_STEPS.md`
 
 ### Production (Yandex Cloud)
-См. инструкции в `infrastructure/README.md`
-
+См. инструкции в `infrastructure/README.md` и `DEPLOYMENT.md`
