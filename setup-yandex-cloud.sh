@@ -33,18 +33,22 @@ echo ""
 echo "📝 Шаг 1: Создание Service Account..."
 SA_NAME="events-sa"
 
-if yc iam service-account get --name $SA_NAME &> /dev/null; then
+FOLDER_ID="b1ggdi2brlp9vqlbg90a"
+echo "📁 Используется каталог: $FOLDER_ID"
+
+# Установка каталога по умолчанию
+yc config set folder-id $FOLDER_ID
+
+if yc iam service-account get --name $SA_NAME --folder-id $FOLDER_ID &> /dev/null; then
     echo "⚠️  Service Account '$SA_NAME' уже существует"
-    SA_ID=$(yc iam service-account get --name $SA_NAME --format json | jq -r '.id')
+    SA_ID=$(yc iam service-account get --name $SA_NAME --folder-id $FOLDER_ID --format json | jq -r '.id')
 else
-    yc iam service-account create --name $SA_NAME --description "Service account for events platform"
-    SA_ID=$(yc iam service-account get --name $SA_NAME --format json | jq -r '.id')
+    yc iam service-account create --name $SA_NAME --folder-id $FOLDER_ID --description "Service account for events platform"
+    SA_ID=$(yc iam service-account get --name $SA_NAME --folder-id $FOLDER_ID --format json | jq -r '.id')
     echo "✅ Service Account создан: $SA_ID"
 fi
 
 # Назначение роли
-FOLDER_ID="b1ggdi2brlp9vqlbg90a"
-echo "📁 Используется каталог: $FOLDER_ID"
 yc resource-manager folder add-access-binding $FOLDER_ID \
   --role editor \
   --subject serviceAccount:$SA_ID \
@@ -61,9 +65,9 @@ DB_USER="events_user"
 # Генерация пароля
 DB_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16)
 
-if yc managed-postgresql cluster get --name $DB_NAME &> /dev/null; then
+if yc managed-postgresql cluster get --name $DB_NAME --folder-id $FOLDER_ID &> /dev/null; then
     echo "⚠️  Кластер '$DB_NAME' уже существует"
-    DB_HOST=$(yc managed-postgresql host list --cluster-name $DB_NAME --format json | jq -r '.[0].name')
+    DB_HOST=$(yc managed-postgresql host list --cluster-name $DB_NAME --folder-id $FOLDER_ID --format json | jq -r '.[0].name')
 else
     echo "Создание кластера PostgreSQL (это может занять несколько минут)..."
     yc managed-postgresql cluster create \
@@ -82,12 +86,12 @@ else
     sleep 30
     
     # Ожидание готовности
-    while [ "$(yc managed-postgresql cluster get --name $DB_NAME --format json | jq -r '.status')" != "RUNNING" ]; do
+    while [ "$(yc managed-postgresql cluster get --name $DB_NAME --folder-id $FOLDER_ID --format json | jq -r '.status')" != "RUNNING" ]; do
         echo "⏳ Ожидание..."
         sleep 10
     done
     
-    DB_HOST=$(yc managed-postgresql host list --cluster-name $DB_NAME --format json | jq -r '.[0].name')
+    DB_HOST=$(yc managed-postgresql host list --cluster-name $DB_NAME --folder-id $FOLDER_ID --format json | jq -r '.[0].name')
     echo "✅ Кластер создан"
 fi
 
@@ -102,12 +106,12 @@ echo ""
 echo "📝 Шаг 3: Создание Container Registry..."
 REGISTRY_NAME="events-registry"
 
-if yc container registry get --name $REGISTRY_NAME &> /dev/null; then
+if yc container registry get --name $REGISTRY_NAME --folder-id $FOLDER_ID &> /dev/null; then
     echo "⚠️  Registry '$REGISTRY_NAME' уже существует"
-    REGISTRY_ID=$(yc container registry get --name $REGISTRY_NAME --format json | jq -r '.id')
+    REGISTRY_ID=$(yc container registry get --name $REGISTRY_NAME --folder-id $FOLDER_ID --format json | jq -r '.id')
 else
-    yc container registry create --name $REGISTRY_NAME --folder-id b1ggdi2brlp9vqlbg90a
-    REGISTRY_ID=$(yc container registry get --name $REGISTRY_NAME --format json | jq -r '.id')
+    yc container registry create --name $REGISTRY_NAME --folder-id $FOLDER_ID
+    REGISTRY_ID=$(yc container registry get --name $REGISTRY_NAME --folder-id $FOLDER_ID --format json | jq -r '.id')
     echo "✅ Registry создан: $REGISTRY_ID"
 fi
 
