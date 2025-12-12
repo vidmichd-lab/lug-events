@@ -39,14 +39,27 @@ echo "📁 Используется каталог: $FOLDER_ID"
 # Установка каталога по умолчанию
 yc config set folder-id $FOLDER_ID
 
-# Проверка существования Service Account в нужном каталоге
-SA_ID=""
-SA_LIST=$(yc iam service-account list --folder-id $FOLDER_ID --format json 2>/dev/null || echo "[]")
-SA_ID=$(echo "$SA_LIST" | jq -r ".[] | select(.name == \"$SA_NAME\") | .id" | head -1)
+# Проверка, можно ли использовать существующий Service Account
+EXISTING_SA_ID="ajeuaiav6i7hoi6tlqbh"
+if yc iam service-account get --id $EXISTING_SA_ID &> /dev/null; then
+    # Проверяем, есть ли у него доступ к нужному каталогу
+    if yc resource-manager folder list-access-bindings $FOLDER_ID --format json 2>/dev/null | jq -r ".[] | select(.subject.id == \"$EXISTING_SA_ID\") | .role" | grep -q "editor"; then
+        echo "✅ Используется существующий Service Account: $EXISTING_SA_ID"
+        SA_ID=$EXISTING_SA_ID
+        SKIP_SA_CREATION=true
+    fi
+fi
 
-if [ ! -z "$SA_ID" ] && [ "$SA_ID" != "null" ]; then
-    echo "✅ Service Account '$SA_NAME' уже существует в каталоге: $SA_ID"
-else
+# Если не используем существующий, создаем новый
+if [ "$SKIP_SA_CREATION" != "true" ]; then
+    # Проверка существования Service Account в нужном каталоге
+    SA_ID=""
+    SA_LIST=$(yc iam service-account list --folder-id $FOLDER_ID --format json 2>/dev/null || echo "[]")
+    SA_ID=$(echo "$SA_LIST" | jq -r ".[] | select(.name == \"$SA_NAME\") | .id" | head -1)
+
+    if [ ! -z "$SA_ID" ] && [ "$SA_ID" != "null" ]; then
+        echo "✅ Service Account '$SA_NAME' уже существует в каталоге: $SA_ID"
+    else
     echo "Создание нового Service Account..."
     CREATE_OUTPUT=$(yc iam service-account create --name $SA_NAME --folder-id $FOLDER_ID --description "Service account for events platform" --format json 2>&1)
     
@@ -87,14 +100,19 @@ else
         echo "  yc iam service-account create --name events-sa-manual --folder-id $FOLDER_ID"
         exit 1
     fi
+    fi
 fi
 
 # Назначение роли (игнорируем ошибку, если роль уже назначена)
-echo "Назначение роли editor..."
-yc resource-manager folder add-access-binding $FOLDER_ID \
-  --role editor \
-  --subject serviceAccount:$SA_ID \
-  2>&1 | grep -v "already exists" || echo "✅ Роль назначена или уже была назначена"
+if [ "$SKIP_SA_CREATION" != "true" ]; then
+    echo "Назначение роли editor..."
+    yc resource-manager folder add-access-binding $FOLDER_ID \
+      --role editor \
+      --subject serviceAccount:$SA_ID \
+      2>&1 | grep -v "already exists" || echo "✅ Роль назначена или уже была назначена"
+else
+    echo "✅ Роль уже назначена для существующего Service Account"
+fi
 
 echo "✅ Service Account настроен"
 echo ""
