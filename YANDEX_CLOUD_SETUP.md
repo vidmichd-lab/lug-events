@@ -46,7 +46,7 @@ SA_ID=$(yc iam service-account get --name events-sa --format json | jq -r '.id')
 echo "Service Account ID: $SA_ID"
 
 # Назначение роли editor
-yc resource-manager folder add-access-binding default \
+yc resource-manager folder add-access-binding b1ggdi2brlp9vqlbg90a \
   --role editor \
   --subject serviceAccount:$SA_ID
 ```
@@ -59,6 +59,7 @@ yc resource-manager folder add-access-binding default \
 # Создание кластера PostgreSQL
 yc managed-postgresql cluster create \
   --name events-db \
+  --folder-id b1ggdi2brlp9vqlbg90a \
   --network-name default \
   --resource-preset s2.micro \
   --disk-type network-ssd \
@@ -87,7 +88,7 @@ echo "Database host: $DB_HOST"
 
 ```bash
 # Создание реестра
-yc container registry create --name events-registry
+yc container registry create --name events-registry --folder-id b1ggdi2brlp9vqlbg90a
 
 # Получение ID реестра
 REGISTRY_ID=$(yc container registry get --name events-registry --format json | jq -r '.id')

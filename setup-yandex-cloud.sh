@@ -43,7 +43,8 @@ else
 fi
 
 # Назначение роли
-FOLDER_ID=$(yc config get folder-id)
+FOLDER_ID="b1ggdi2brlp9vqlbg90a"
+echo "📁 Используется каталог: $FOLDER_ID"
 yc resource-manager folder add-access-binding $FOLDER_ID \
   --role editor \
   --subject serviceAccount:$SA_ID \
@@ -67,6 +68,7 @@ else
     echo "Создание кластера PostgreSQL (это может занять несколько минут)..."
     yc managed-postgresql cluster create \
       --name $DB_NAME \
+      --folder-id b1ggdi2brlp9vqlbg90a \
       --network-name default \
       --resource-preset s2.micro \
       --disk-type network-ssd \
@@ -104,7 +106,7 @@ if yc container registry get --name $REGISTRY_NAME &> /dev/null; then
     echo "⚠️  Registry '$REGISTRY_NAME' уже существует"
     REGISTRY_ID=$(yc container registry get --name $REGISTRY_NAME --format json | jq -r '.id')
 else
-    yc container registry create --name $REGISTRY_NAME
+    yc container registry create --name $REGISTRY_NAME --folder-id b1ggdi2brlp9vqlbg90a
     REGISTRY_ID=$(yc container registry get --name $REGISTRY_NAME --format json | jq -r '.id')
     echo "✅ Registry создан: $REGISTRY_ID"
 fi
@@ -126,6 +128,7 @@ cat > $CONFIG_FILE << EOF
 # Yandex Cloud Configuration
 # Generated: $(date)
 
+FOLDER_ID=b1ggdi2brlp9vqlbg90a
 SERVICE_ACCOUNT_ID=$SA_ID
 DATABASE_URL=$DATABASE_URL
 DB_HOST=$DB_HOST

@@ -13,6 +13,9 @@ yc version
 # 2. Инициализируйте YC CLI (если еще не сделано)
 yc init
 
+# Убедитесь, что используете правильный каталог:
+yc config set folder-id b1ggdi2brlp9vqlbg90a
+
 # 3. Запустите скрипт автоматической настройки
 ./setup-yandex-cloud.sh
 
